@@ -1,0 +1,6 @@
+# Old timestamped editing backups (kept locally, not needed in the repo)
+archive/
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
