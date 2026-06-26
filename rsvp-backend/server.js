@@ -1,135 +1,176 @@
 /**
  * RSVP backend — zero-dependency Node.js server.
  *
- * Endpoints:
+ * Public:
  *   POST /api/rsvp                  -> save one RSVP (JSON body from the invitation form)
- *   GET  /api/attendees?key=KEY     -> JSON list of all RSVPs (admin)
- *   GET  /api/attendees.csv?key=KEY -> CSV download (admin)
- *   GET  /api/admin?key=KEY         -> simple HTML guest-list page (admin)
+ * Admin (password login, session cookie):
+ *   GET  /api/admin                 -> login page, then the guest-list page
+ *   POST /api/login                 -> check password, set session cookie
+ *   GET  /api/logout                -> clear session
+ *   GET  /api/attendees             -> JSON (cookie session OR ?key=PASSWORD)
+ *   GET  /api/attendees.csv         -> CSV download (cookie session OR ?key=PASSWORD)
  *
- * Run:   RSVP_ADMIN_KEY=yoursecret PORT=3000 node server.js
+ * Run:   RSVP_ADMIN_KEY=yoursecret PORT=3007 node server.js
  * PM2:   pm2 start ecosystem.config.js
  *
- * Data is appended to ./data/rsvps.ndjson (one JSON object per line).
+ * RSVP_ADMIN_KEY is the admin PASSWORD. Data is appended to ./data/rsvps.ndjson.
  */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-const PORT = process.env.PORT || 3000;
-const ADMIN_KEY = process.env.RSVP_ADMIN_KEY || 'change-me';
+const PORT = process.env.PORT || 3007;
+const ADMIN_KEY = process.env.RSVP_ADMIN_KEY || 'change-me';      // the admin password
+const COOKIE = 'rsvp_auth';
+const MAX_AGE = 7 * 24 * 3600;                                    // 7-day session
+const TOKEN = crypto.createHmac('sha256', ADMIN_KEY).update('rsvp-admin-v1').digest('hex');
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'rsvps.ndjson');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-
 const FIELDS = ['ts', 'name', 'email', 'attending', 'guests', 'meal', 'message'];
 
-function send(res, status, body, type) {
-  res.writeHead(status, {
+function safeEqual(a, b) {
+  const A = Buffer.from(String(a)), B = Buffer.from(String(b));
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
+}
+function parseCookies(req) {
+  const out = {};
+  (req.headers.cookie || '').split(';').forEach(function (p) {
+    const i = p.indexOf('='); if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+  });
+  return out;
+}
+function authed(req, u) {
+  const c = parseCookies(req);
+  if (c[COOKIE] && safeEqual(c[COOKIE], TOKEN)) return true;
+  if (u && safeEqual(u.searchParams.get('key') || '', ADMIN_KEY)) return true; // backward-compatible ?key
+  return false;
+}
+function send(res, status, body, type, extra) {
+  res.writeHead(status, Object.assign({
     'Content-Type': type || 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store',
-  });
+  }, extra || {}));
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
-
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function readAll() {
   if (!fs.existsSync(DATA_FILE)) return [];
-  return fs.readFileSync(DATA_FILE, 'utf8')
-    .split('\n').filter(Boolean)
-    .map(function (l) { try { return JSON.parse(l); } catch (e) { return null; } })
-    .filter(Boolean);
+  return fs.readFileSync(DATA_FILE, 'utf8').split('\n').filter(Boolean)
+    .map(function (l) { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+}
+function readBody(req, cb) {
+  let b = ''; req.on('data', function (c) { b += c; if (b.length > 1e5) req.destroy(); });
+  req.on('end', function () { cb(b); });
+}
+function setCookie(maxAge) {
+  return COOKIE + '=' + (maxAge > 0 ? TOKEN : '') + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=' + maxAge;
 }
 
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+function loginPage(msg) {
+  return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Guest List — Sign in</title><style>' +
+    'body{font:15px/1.5 system-ui,-apple-system,sans-serif;min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;background:#10193f}' +
+    'form{background:#F7F3EC;padding:42px 34px;border-radius:8px;box-shadow:0 30px 80px -30px rgba(0,0,0,.6);width:300px;text-align:center}' +
+    'h1{font:600 26px Georgia,serif;margin:0 0 2px;color:#1b2447}p.sub{margin:0 0 24px;color:#A87C2E;font-size:12px;letter-spacing:.22em;text-transform:uppercase}' +
+    'input{width:100%;box-sizing:border-box;padding:12px 13px;margin:0 0 14px;border:1px solid #d8ccb0;border-radius:4px;font-size:15px;background:#fff}' +
+    'button{width:100%;padding:12px;border:0;border-radius:4px;background:#A87C2E;color:#fff;font-weight:600;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}' +
+    '.err{color:#b3261e;font-size:13px;margin:-4px 0 12px}</style>' +
+    '<form method="POST" action="/api/login"><h1>Haydn &amp; Marisa</h1><p class="sub">Guest List</p>' +
+    (msg ? '<p class="err">' + esc(msg) + '</p>' : '') +
+    '<input name="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>' +
+    '<button type="submit">Sign in</button></form>';
+}
+
+function adminPage(list) {
+  let yes = 0, no = 0, heads = 0;
+  list.forEach(function (r) {
+    if (String(r.attending).toLowerCase().indexOf('y') === 0) { yes++; heads += parseInt(r.guests, 10) || 1; }
+    else no++;
+  });
+  const rows = list.slice().reverse().map(function (r) {
+    return '<tr><td>' + esc(r.ts.replace('T', ' ').slice(0, 16)) + '</td><td>' + esc(r.name) +
+      '</td><td>' + esc(r.attending) + '</td><td>' + esc(r.guests) + '</td><td>' + esc(r.meal) +
+      '</td><td>' + esc(r.email) + '</td><td>' + esc(r.message) + '</td></tr>';
+  }).join('');
+  return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Guest List</title><style>body{font:15px/1.5 system-ui,sans-serif;margin:32px;color:#1b2447;background:#F7F3EC}' +
+    'h1{font-weight:600;display:inline-block;margin:0 14px 0 0}.stats{margin:6px 0 20px;font-size:18px}.stats b{color:#A87C2E}' +
+    'table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 8px 30px -16px rgba(0,0,0,.3)}' +
+    'th,td{border:1px solid #e6dcc6;padding:8px 10px;text-align:left;vertical-align:top}th{background:#1b2447;color:#fff;font-weight:600}' +
+    'a.btn{display:inline-block;margin:0 8px 18px 0;background:#A87C2E;color:#fff;padding:8px 16px;border-radius:4px;text-decoration:none;font-size:14px}' +
+    'a.logout{background:#5a5c66}</style>' +
+    '<h1>Haydn &amp; Marisa — Guest List</h1>' +
+    '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' + heads +
+    ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
+    '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn logout" href="/api/logout">Log out</a>' +
+    '<table><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th></tr>' +
+    rows + '</table>';
 }
 
 const server = http.createServer(function (req, res) {
   const u = new URL(req.url, 'http://localhost');
-
   if (req.method === 'OPTIONS') return send(res, 204, '');
 
   // ---- save an RSVP ----
   if (req.method === 'POST' && u.pathname === '/api/rsvp') {
-    let body = '';
-    req.on('data', function (c) { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', function () {
-      let d = {};
-      try { d = JSON.parse(body || '{}'); } catch (e) {}
+    return readBody(req, function (body) {
+      let d = {}; try { d = JSON.parse(body || '{}'); } catch (e) {}
       const rec = {
         ts: new Date().toISOString(),
-        name: String(d.name || '').slice(0, 200),
-        email: String(d.email || '').slice(0, 200),
-        attending: String(d.attending || '').slice(0, 20),
-        guests: String(d.guests || '').slice(0, 10),
-        meal: String(d.meal || '').slice(0, 120),
-        message: String(d.message || '').slice(0, 2000),
+        name: String(d.name || '').slice(0, 200), email: String(d.email || '').slice(0, 200),
+        attending: String(d.attending || '').slice(0, 20), guests: String(d.guests || '').slice(0, 10),
+        meal: String(d.meal || '').slice(0, 120), message: String(d.message || '').slice(0, 2000),
       };
-      try {
-        fs.appendFileSync(DATA_FILE, JSON.stringify(rec) + '\n');
-        send(res, 200, { ok: true });
-      } catch (e) {
-        send(res, 500, { ok: false, error: 'write failed' });
-      }
+      try { fs.appendFileSync(DATA_FILE, JSON.stringify(rec) + '\n'); send(res, 200, { ok: true }); }
+      catch (e) { send(res, 500, { ok: false, error: 'write failed' }); }
     });
-    return;
   }
 
-  // ---- admin (key-protected) ----
-  const isAdmin = ['/api/attendees', '/api/attendees.csv', '/api/admin'].indexOf(u.pathname) !== -1;
-  if (req.method === 'GET' && isAdmin) {
-    if (u.searchParams.get('key') !== ADMIN_KEY) return send(res, 401, { ok: false, error: 'unauthorized' });
-    const list = readAll();
-
-    if (u.pathname === '/api/attendees') {
-      return send(res, 200, { ok: true, count: list.length, attendees: list });
-    }
-
-    if (u.pathname === '/api/attendees.csv') {
-      const q = function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
-      const csv = [FIELDS.join(',')]
-        .concat(list.map(function (r) { return FIELDS.map(function (f) { return q(r[f]); }).join(','); }))
-        .join('\n');
-      res.setHeader('Content-Disposition', 'attachment; filename="rsvps.csv"');
-      return send(res, 200, csv, 'text/csv; charset=utf-8');
-    }
-
-    // /api/admin -> HTML page
-    let yes = 0, no = 0, heads = 0;
-    list.forEach(function (r) {
-      if (String(r.attending).toLowerCase().indexOf('y') === 0) { yes++; heads += parseInt(r.guests, 10) || 1; }
-      else no++;
+  // ---- login ----
+  if (req.method === 'POST' && u.pathname === '/api/login') {
+    return readBody(req, function (body) {
+      const params = new URLSearchParams(body);
+      if (safeEqual(params.get('password') || '', ADMIN_KEY)) {
+        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/admin' });
+      } else {
+        send(res, 401, loginPage('Incorrect password'), 'text/html; charset=utf-8');
+      }
     });
-    const rows = list.slice().reverse().map(function (r) {
-      return '<tr><td>' + esc(r.ts.replace('T', ' ').slice(0, 16)) + '</td><td>' + esc(r.name) +
-        '</td><td>' + esc(r.attending) + '</td><td>' + esc(r.guests) + '</td><td>' + esc(r.meal) +
-        '</td><td>' + esc(r.email) + '</td><td>' + esc(r.message) + '</td></tr>';
-    }).join('');
-    const html = '<!doctype html><meta charset="utf-8"><title>Guest List</title>' +
-      '<style>body{font:15px/1.5 system-ui,sans-serif;margin:32px;color:#1b2447;background:#F7F3EC}' +
-      'h1{font-weight:600}.stats{margin:0 0 20px;font-size:18px}.stats b{color:#A87C2E}' +
-      'table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 8px 30px -16px rgba(0,0,0,.3)}' +
-      'th,td{border:1px solid #e6dcc6;padding:8px 10px;text-align:left;vertical-align:top}' +
-      'th{background:#1b2447;color:#fff;font-weight:600}a.btn{display:inline-block;margin-bottom:18px;' +
-      'background:#A87C2E;color:#fff;padding:8px 16px;border-radius:4px;text-decoration:none}</style>' +
-      '<h1>Haydn &amp; Marisa — Guest List</h1>' +
-      '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' +
-      heads + ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
-      '<a class="btn" href="/api/attendees.csv?key=' + esc(u.searchParams.get('key')) + '">Download CSV</a>' +
-      '<table><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th></tr>' +
-      rows + '</table>';
-    return send(res, 200, html, 'text/html; charset=utf-8');
+  }
+
+  // ---- logout ----
+  if (req.method === 'GET' && u.pathname === '/api/logout') {
+    return send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(0), 'Location': '/api/admin' });
+  }
+
+  // ---- admin page (login form if not authed) ----
+  if (req.method === 'GET' && u.pathname === '/api/admin') {
+    if (!authed(req, u)) return send(res, 200, loginPage(''), 'text/html; charset=utf-8');
+    return send(res, 200, adminPage(readAll()), 'text/html; charset=utf-8', { 'Set-Cookie': setCookie(MAX_AGE) });
+  }
+
+  // ---- data endpoints (cookie session OR ?key=PASSWORD) ----
+  if (req.method === 'GET' && (u.pathname === '/api/attendees' || u.pathname === '/api/attendees.csv')) {
+    if (!authed(req, u)) return send(res, 401, { ok: false, error: 'unauthorized' });
+    const list = readAll();
+    if (u.pathname === '/api/attendees') return send(res, 200, { ok: true, count: list.length, attendees: list });
+    const q = function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
+    const csv = [FIELDS.join(',')].concat(list.map(function (r) { return FIELDS.map(function (f) { return q(r[f]); }).join(','); })).join('\n');
+    return send(res, 200, csv, 'text/csv; charset=utf-8', { 'Content-Disposition': 'attachment; filename="rsvps.csv"' });
   }
 
   send(res, 404, { ok: false, error: 'not found' });
 });
 
 server.listen(PORT, function () {
-  console.log('RSVP backend listening on http://localhost:' + PORT + ' (admin key: ' +
-    (ADMIN_KEY === 'change-me' ? 'CHANGE ME via RSVP_ADMIN_KEY!' : 'set') + ')');
+  console.log('RSVP backend on http://localhost:' + PORT +
+    (ADMIN_KEY === 'change-me' ? '  (⚠ set RSVP_ADMIN_KEY!)' : ''));
 });
