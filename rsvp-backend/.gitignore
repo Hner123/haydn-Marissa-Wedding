@@ -1,0 +1,4 @@
+# RSVP submissions (live data — keep off the repo)
+data/
+node_modules/
+npm-debug.log

@@ -1,0 +1,19 @@
+# ============================================================================
+#  Haydn & Marisa invitation — Caddy block
+#  Add this block to your existing /etc/caddy/Caddyfile (alongside your other
+#  sites). The invitation is a STATIC file (root + file_server); only the RSVP
+#  API (/api/*) is proxied to the Node backend (PM2) on port 3007.
+# ============================================================================
+
+haydnmarisa.site {
+    root * /var/www/wedding/deploy
+    file_server
+    encode gzip zstd
+    reverse_proxy /api/* 127.0.0.1:3007
+}
+
+# --- Optional: make www redirect to the bare domain ---
+# Requires a DNS record:  CNAME  www  ->  haydnmarisa.site
+# www.haydnmarisa.site {
+#     redir https://haydnmarisa.site{uri}
+# }

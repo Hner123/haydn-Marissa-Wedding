@@ -1,0 +1,13 @@
+{
+  "name": "haydn-marisa-rsvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency RSVP backend for the Haydn & Marisa convalidation invitation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
