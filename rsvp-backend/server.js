@@ -46,7 +46,7 @@ function verifyPassword(pw) {
 function currentToken() {
   return crypto.createHmac('sha256', pwHash ? pwHash.hash : ADMIN_KEY).update('rsvp-admin-v1').digest('hex');
 }
-const FIELDS = ['ts', 'name', 'email', 'attending', 'guests', 'meal', 'message'];
+const FIELDS = ['ts', 'name', 'attending', 'message'];
 
 function safeEqual(a, b) {
   const A = Buffer.from(String(a)), B = Buffer.from(String(b));
@@ -134,8 +134,7 @@ function adminPage(list) {
   const rows = list.slice().reverse().map(function (r) {
     const att = String(r.attending).toLowerCase().indexOf('y') === 0 ? 'yes' : 'no';
     return '<tr data-att="' + att + '"><td data-label="When">' + esc(r.ts.replace('T', ' ').slice(0, 16)) + '</td><td data-label="Name">' + esc(r.name) +
-      '</td><td data-label="Attending">' + esc(r.attending) + '</td><td data-label="Guests">' + esc(r.guests) + '</td><td data-label="Meal">' + esc(r.meal) +
-      '</td><td data-label="Email">' + esc(r.email) + '</td><td data-label="Message">' + esc(r.message) + '</td>' +
+      '</td><td data-label="Attending">' + esc(r.attending) + '</td><td data-label="Message">' + esc(r.message) + '</td>' +
       '<td data-label="Delete"><button type="button" class="del" data-ts="' + esc(r.ts) + '" data-name="' + esc(r.name) + '" ' +
       'style="background:#b3261e;color:#fff;border:0;border-radius:4px;padding:5px 11px;cursor:pointer">Delete</button></td></tr>';
   }).join('');
@@ -155,12 +154,12 @@ function adminPage(list) {
     '.modal-ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(16,25,63,.55);z-index:1000}.modal-ov.show{display:flex;animation:ovIn .2s ease}.modal-bx{background:#F7F3EC;border-radius:10px;padding:30px 30px 24px;max-width:380px;width:90%;text-align:center;box-shadow:0 40px 90px -30px rgba(0,0,0,.6)}.modal-ov.show .modal-bx{animation:bxIn .3s cubic-bezier(.16,.84,.44,1)}.modal-bx h3{font:600 22px Georgia,serif;margin:0 0 8px;color:#1b2447}.modal-bx p{margin:0 0 22px;color:#5a5c66;font-size:15px}.modal-ac{display:flex;gap:10px;justify-content:center}.modal-ac button{padding:10px 22px;border:0;border-radius:5px;font-size:14px;font-weight:600;cursor:pointer}.btn-cancel{background:#e3dac6;color:#1b2447}.btn-del{background:#b3261e;color:#fff}@keyframes ovIn{from{opacity:0}to{opacity:1}}@keyframes bxIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}' +
     '@media(max-width:640px){body{margin:0 14px 40px}h1{font-size:21px}.bar{padding:12px 0 10px}thead{display:none}table,tbody,tr,td{display:block;width:auto}table{box-shadow:none}tr{margin:0 0 14px;border:1px solid #e6dcc6;border-radius:8px;background:#fff;overflow:hidden}td{border:0;border-bottom:1px solid #f0e9da;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:right;word-break:break-word}td:last-child{border-bottom:0}td::before{content:attr(data-label);font-weight:600;color:#A87C2E;text-transform:uppercase;font-size:11px;letter-spacing:.08em;text-align:left;flex:0 0 auto}#count{margin-left:0}}</style>' +
     '<div class="bar"><h1>Haydn &amp; Marisa — Guest List</h1>' +
-    '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' + heads + ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
+    '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
     '<div class="controls"><input id="q" type="search" placeholder="Search name, email, message…">' +
     '<div class="filters"><button class="f active" data-f="all">All</button><button class="f" data-f="yes">Attending</button><button class="f" data-f="no">Regrets</button></div>' +
     '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn" href="/api/change-password">Change password</a><a class="btn logout" href="/api/logout">Log out</a>' +
     '<span id="count"></span></div></div>' +
-    '<table><thead><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th><th>Delete</th></tr></thead><tbody id="tb">' +
+    '<table><thead><tr><th>When</th><th>Name</th><th>Attending</th><th>Message</th><th>Delete</th></tr></thead><tbody id="tb">' +
     rows + '</tbody></table>' +
     '<div id="modal" class="modal-ov"><div class="modal-bx"><h3>Delete RSVP?</h3><p>Remove the response from <strong id="m-name"></strong>? This cannot be undone.</p><div class="modal-ac"><button type="button" id="m-cancel" class="btn-cancel">Cancel</button><form method="POST" action="/api/delete" style="margin:0"><input type="hidden" name="ts" id="m-ts"><button type="submit" class="btn-del">Delete</button></form></div></div></div>' +
     '<script>(function(){var rows=[].slice.call(document.querySelectorAll("#tb tr"));var q=document.getElementById("q"),countEl=document.getElementById("count"),filt="all";function apply(){var term=(q.value||"").toLowerCase(),shown=0;rows.forEach(function(tr){var okF=filt==="all"||tr.getAttribute("data-att")===filt;var okQ=!term||tr.textContent.toLowerCase().indexOf(term)>=0;var show=okF&&okQ;tr.style.display=show?"":"none";if(show)shown++;});countEl.textContent="Showing "+shown+" of "+rows.length;}q.addEventListener("input",apply);document.querySelectorAll("button.f").forEach(function(b){b.addEventListener("click",function(){document.querySelectorAll("button.f").forEach(function(x){x.classList.remove("active");});b.classList.add("active");filt=b.getAttribute("data-f");apply();});});apply();var m=document.getElementById("modal"),n=document.getElementById("m-name"),t=document.getElementById("m-ts");function o(ts,nm){t.value=ts;n.textContent=nm||"this guest";m.classList.add("show");}function c(){m.classList.remove("show");}document.querySelectorAll("button.del").forEach(function(b){b.addEventListener("click",function(){o(b.getAttribute("data-ts"),b.getAttribute("data-name"));});});document.getElementById("m-cancel").addEventListener("click",c);m.addEventListener("click",function(e){if(e.target===m)c();});document.addEventListener("keydown",function(e){if(e.key==="Escape")c();});})();</script>';
