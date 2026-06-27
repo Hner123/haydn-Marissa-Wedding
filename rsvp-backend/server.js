@@ -24,10 +24,28 @@ const PORT = process.env.PORT || 3007;
 const ADMIN_KEY = process.env.RSVP_ADMIN_KEY || 'change-me';      // the admin password
 const COOKIE = 'rsvp_auth';
 const MAX_AGE = 7 * 24 * 3600;                                    // 7-day session
-const TOKEN = crypto.createHmac('sha256', ADMIN_KEY).update('rsvp-admin-v1').digest('hex');
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'rsvps.ndjson');
+const PW_FILE = path.join(DATA_DIR, 'admin.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Admin password: hashed in admin.json once changed via the dashboard;
+// until then, RSVP_ADMIN_KEY (env) is the initial password.
+let pwHash = null;
+try { pwHash = JSON.parse(fs.readFileSync(PW_FILE, 'utf8')); } catch (e) {}
+function setPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  pwHash = { salt: salt, hash: crypto.scryptSync(String(pw), salt, 64).toString('hex') };
+  fs.writeFileSync(PW_FILE, JSON.stringify(pwHash));
+}
+function verifyPassword(pw) {
+  pw = String(pw || '');
+  if (pwHash) return safeEqual(crypto.scryptSync(pw, pwHash.salt, 64).toString('hex'), pwHash.hash);
+  return safeEqual(pw, ADMIN_KEY);
+}
+function currentToken() {
+  return crypto.createHmac('sha256', pwHash ? pwHash.hash : ADMIN_KEY).update('rsvp-admin-v1').digest('hex');
+}
 const FIELDS = ['ts', 'name', 'email', 'attending', 'guests', 'meal', 'message'];
 
 function safeEqual(a, b) {
@@ -43,8 +61,8 @@ function parseCookies(req) {
 }
 function authed(req, u) {
   const c = parseCookies(req);
-  if (c[COOKIE] && safeEqual(c[COOKIE], TOKEN)) return true;
-  if (u && safeEqual(u.searchParams.get('key') || '', ADMIN_KEY)) return true; // backward-compatible ?key
+  if (c[COOKIE] && safeEqual(c[COOKIE], currentToken())) return true;
+  if (u && verifyPassword(u.searchParams.get('key') || '')) return true; // backward-compatible ?key
   return false;
 }
 function send(res, status, body, type, extra) {
@@ -71,7 +89,7 @@ function readBody(req, cb) {
   req.on('end', function () { cb(b); });
 }
 function setCookie(maxAge) {
-  return COOKIE + '=' + (maxAge > 0 ? TOKEN : '') + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=' + maxAge;
+  return COOKIE + '=' + (maxAge > 0 ? currentToken() : '') + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=' + maxAge;
 }
 
 function loginPage(msg) {
@@ -87,6 +105,24 @@ function loginPage(msg) {
     (msg ? '<p class="err">' + esc(msg) + '</p>' : '') +
     '<input name="password" type="password" placeholder="Password" autocomplete="current-password" autofocus>' +
     '<button type="submit">Sign in</button></form>';
+}
+
+function changePwPage(msg, ok) {
+  return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Change Password</title><style>' +
+    'body{font:15px/1.5 system-ui,-apple-system,sans-serif;min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;background:#10193f}' +
+    'form{background:#F7F3EC;padding:42px 34px;border-radius:8px;box-shadow:0 30px 80px -30px rgba(0,0,0,.6);width:300px;text-align:center}' +
+    'h1{font:600 24px Georgia,serif;margin:0 0 2px;color:#1b2447}p.sub{margin:0 0 22px;color:#A87C2E;font-size:12px;letter-spacing:.22em;text-transform:uppercase}' +
+    'input{width:100%;box-sizing:border-box;padding:12px 13px;margin:0 0 12px;border:1px solid #d8ccb0;border-radius:4px;font-size:15px;background:#fff}' +
+    'button{width:100%;padding:12px;border:0;border-radius:4px;background:#A87C2E;color:#fff;font-weight:600;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}' +
+    '.err{color:#b3261e;font-size:13px;margin:-2px 0 12px}.ok{color:#2e7d32;font-size:13px;margin:-2px 0 12px}a{color:#A87C2E}</style>' +
+    '<form method="POST" action="/api/change-password"><h1>Change Password</h1><p class="sub">Haydn &amp; Marisa</p>' +
+    (msg ? '<p class="' + (ok ? 'ok' : 'err') + '">' + esc(msg) + '</p>' : '') +
+    '<input name="current" type="password" placeholder="Current password" autocomplete="current-password" autofocus>' +
+    '<input name="newpw" type="password" placeholder="New password (min 6 chars)" autocomplete="new-password">' +
+    '<input name="confirm" type="password" placeholder="Confirm new password" autocomplete="new-password">' +
+    '<button type="submit">Update password</button>' +
+    '<p style="margin:16px 0 0;font-size:13px"><a href="/api/admin">← Back to guest list</a></p></form>';
 }
 
 function adminPage(list) {
@@ -122,7 +158,7 @@ function adminPage(list) {
     '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' + heads + ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
     '<div class="controls"><input id="q" type="search" placeholder="Search name, email, message…">' +
     '<div class="filters"><button class="f active" data-f="all">All</button><button class="f" data-f="yes">Attending</button><button class="f" data-f="no">Regrets</button></div>' +
-    '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn logout" href="/api/logout">Log out</a>' +
+    '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn" href="/api/change-password">Change password</a><a class="btn logout" href="/api/logout">Log out</a>' +
     '<span id="count"></span></div></div>' +
     '<table><thead><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th><th>Delete</th></tr></thead><tbody id="tb">' +
     rows + '</tbody></table>' +
@@ -152,7 +188,7 @@ const server = http.createServer(function (req, res) {
   if (req.method === 'POST' && u.pathname === '/api/login') {
     return readBody(req, function (body) {
       const params = new URLSearchParams(body);
-      if (safeEqual(params.get('password') || '', ADMIN_KEY)) {
+      if (verifyPassword(params.get('password') || '')) {
         send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/admin' });
       } else {
         send(res, 401, loginPage('Incorrect password'), 'text/html; charset=utf-8');
@@ -163,6 +199,23 @@ const server = http.createServer(function (req, res) {
   // ---- logout ----
   if (req.method === 'GET' && u.pathname === '/api/logout') {
     return send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(0), 'Location': '/api/admin' });
+  }
+
+  // ---- change password ----
+  if (u.pathname === '/api/change-password') {
+    if (!authed(req, u)) return send(res, 200, loginPage(''), 'text/html; charset=utf-8');
+    if (req.method === 'GET') return send(res, 200, changePwPage(''), 'text/html; charset=utf-8');
+    if (req.method === 'POST') {
+      return readBody(req, function (body) {
+        const ps = new URLSearchParams(body);
+        const cur = ps.get('current') || '', np = ps.get('newpw') || '', cf = ps.get('confirm') || '';
+        if (!verifyPassword(cur)) return send(res, 200, changePwPage('Current password is incorrect'), 'text/html; charset=utf-8');
+        if (np.length < 6) return send(res, 200, changePwPage('New password must be at least 6 characters'), 'text/html; charset=utf-8');
+        if (np !== cf) return send(res, 200, changePwPage('New passwords do not match'), 'text/html; charset=utf-8');
+        setPassword(np);
+        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/admin' });
+      });
+    }
   }
 
   // ---- delete one RSVP (by timestamp) ----
