@@ -4,7 +4,7 @@
  * Public:
  *   POST /api/rsvp                  -> save one RSVP (JSON body from the invitation form)
  * Admin (password login, session cookie):
- *   GET  /api/admin                 -> login page, then the guest-list page
+ *   GET  /api/guests                 -> login page, then the guest-list page
  *   POST /api/login                 -> check password, set session cookie
  *   GET  /api/logout                -> clear session
  *   GET  /api/attendees             -> JSON (cookie session OR ?key=PASSWORD)
@@ -122,7 +122,7 @@ function changePwPage(msg, ok) {
     '<input name="newpw" type="password" placeholder="New password (min 6 chars)" autocomplete="new-password">' +
     '<input name="confirm" type="password" placeholder="Confirm new password" autocomplete="new-password">' +
     '<button type="submit">Update password</button>' +
-    '<p style="margin:16px 0 0;font-size:13px"><a href="/api/admin">← Back to guest list</a></p></form>';
+    '<p style="margin:16px 0 0;font-size:13px"><a href="/api/guests">← Back to guest list</a></p></form>';
 }
 
 function adminPage(list) {
@@ -189,7 +189,7 @@ const server = http.createServer(function (req, res) {
     return readBody(req, function (body) {
       const params = new URLSearchParams(body);
       if (verifyPassword(params.get('password') || '')) {
-        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/admin' });
+        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/guests' });
       } else {
         send(res, 401, loginPage('Incorrect password'), 'text/html; charset=utf-8');
       }
@@ -198,7 +198,7 @@ const server = http.createServer(function (req, res) {
 
   // ---- logout ----
   if (req.method === 'GET' && u.pathname === '/api/logout') {
-    return send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(0), 'Location': '/api/admin' });
+    return send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(0), 'Location': '/api/guests' });
   }
 
   // ---- change password ----
@@ -213,7 +213,7 @@ const server = http.createServer(function (req, res) {
         if (np.length < 6) return send(res, 200, changePwPage('New password must be at least 6 characters'), 'text/html; charset=utf-8');
         if (np !== cf) return send(res, 200, changePwPage('New passwords do not match'), 'text/html; charset=utf-8');
         setPassword(np);
-        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/admin' });
+        send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(MAX_AGE), 'Location': '/api/guests' });
       });
     }
   }
@@ -226,13 +226,13 @@ const server = http.createServer(function (req, res) {
       const list = readAll().filter(function (r) { return r.ts !== ts; });
       try {
         fs.writeFileSync(DATA_FILE, list.map(function (r) { return JSON.stringify(r); }).join('\n') + (list.length ? '\n' : ''));
-        send(res, 302, '', 'text/html', { 'Location': '/api/admin' });
+        send(res, 302, '', 'text/html', { 'Location': '/api/guests' });
       } catch (e) { send(res, 500, { ok: false, error: 'write failed' }); }
     });
   }
 
   // ---- admin page (login form if not authed) ----
-  if (req.method === 'GET' && u.pathname === '/api/admin') {
+  if (req.method === 'GET' && u.pathname === '/api/guests') {
     if (!authed(req, u)) return send(res, 200, loginPage(''), 'text/html; charset=utf-8');
     return send(res, 200, adminPage(readAll()), 'text/html; charset=utf-8', { 'Set-Cookie': setCookie(MAX_AGE) });
   }
