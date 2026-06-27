@@ -98,7 +98,11 @@ function adminPage(list) {
   const rows = list.slice().reverse().map(function (r) {
     return '<tr><td>' + esc(r.ts.replace('T', ' ').slice(0, 16)) + '</td><td>' + esc(r.name) +
       '</td><td>' + esc(r.attending) + '</td><td>' + esc(r.guests) + '</td><td>' + esc(r.meal) +
-      '</td><td>' + esc(r.email) + '</td><td>' + esc(r.message) + '</td></tr>';
+      '</td><td>' + esc(r.email) + '</td><td>' + esc(r.message) + '</td>' +
+      '<td><form method="POST" action="/api/delete" onsubmit="return confirm(\'Delete this RSVP?\')" style="margin:0">' +
+      '<input type="hidden" name="ts" value="' + esc(r.ts) + '">' +
+      '<button type="submit" style="background:#b3261e;color:#fff;border:0;border-radius:4px;padding:5px 11px;cursor:pointer">Delete</button>' +
+      '</form></td></tr>';
   }).join('');
   return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>Guest List</title><style>body{font:15px/1.5 system-ui,sans-serif;margin:32px;color:#1b2447;background:#F7F3EC}' +
@@ -111,7 +115,7 @@ function adminPage(list) {
     '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' + heads +
     ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
     '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn logout" href="/api/logout">Log out</a>' +
-    '<table><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th></tr>' +
+    '<table><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th><th>Delete</th></tr>' +
     rows + '</table>';
 }
 
@@ -149,6 +153,19 @@ const server = http.createServer(function (req, res) {
   // ---- logout ----
   if (req.method === 'GET' && u.pathname === '/api/logout') {
     return send(res, 302, '', 'text/html', { 'Set-Cookie': setCookie(0), 'Location': '/api/admin' });
+  }
+
+  // ---- delete one RSVP (by timestamp) ----
+  if (req.method === 'POST' && u.pathname === '/api/delete') {
+    if (!authed(req, u)) return send(res, 401, { ok: false, error: 'unauthorized' });
+    return readBody(req, function (body) {
+      const ts = new URLSearchParams(body).get('ts') || '';
+      const list = readAll().filter(function (r) { return r.ts !== ts; });
+      try {
+        fs.writeFileSync(DATA_FILE, list.map(function (r) { return JSON.stringify(r); }).join('\n') + (list.length ? '\n' : ''));
+        send(res, 302, '', 'text/html', { 'Location': '/api/admin' });
+      } catch (e) { send(res, 500, { ok: false, error: 'write failed' }); }
+    });
   }
 
   // ---- admin page (login form if not authed) ----
