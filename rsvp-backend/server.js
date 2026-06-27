@@ -99,10 +99,8 @@ function adminPage(list) {
     return '<tr><td>' + esc(r.ts.replace('T', ' ').slice(0, 16)) + '</td><td>' + esc(r.name) +
       '</td><td>' + esc(r.attending) + '</td><td>' + esc(r.guests) + '</td><td>' + esc(r.meal) +
       '</td><td>' + esc(r.email) + '</td><td>' + esc(r.message) + '</td>' +
-      '<td><form method="POST" action="/api/delete" onsubmit="return confirm(\'Delete this RSVP?\')" style="margin:0">' +
-      '<input type="hidden" name="ts" value="' + esc(r.ts) + '">' +
-      '<button type="submit" style="background:#b3261e;color:#fff;border:0;border-radius:4px;padding:5px 11px;cursor:pointer">Delete</button>' +
-      '</form></td></tr>';
+      '<td><button type="button" class="del" data-ts="' + esc(r.ts) + '" data-name="' + esc(r.name) + '" ' +
+      'style="background:#b3261e;color:#fff;border:0;border-radius:4px;padding:5px 11px;cursor:pointer">Delete</button></td></tr>';
   }).join('');
   return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>Guest List</title><style>body{font:15px/1.5 system-ui,sans-serif;margin:32px;color:#1b2447;background:#F7F3EC}' +
@@ -110,13 +108,15 @@ function adminPage(list) {
     'table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 8px 30px -16px rgba(0,0,0,.3)}' +
     'th,td{border:1px solid #e6dcc6;padding:8px 10px;text-align:left;vertical-align:top}th{background:#1b2447;color:#fff;font-weight:600}' +
     'a.btn{display:inline-block;margin:0 8px 18px 0;background:#A87C2E;color:#fff;padding:8px 16px;border-radius:4px;text-decoration:none;font-size:14px}' +
-    'a.logout{background:#5a5c66}</style>' +
+    'a.logout{background:#5a5c66}.modal-ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(16,25,63,.55);z-index:1000}.modal-ov.show{display:flex;animation:ovIn .2s ease}.modal-bx{background:#F7F3EC;border-radius:10px;padding:30px 30px 24px;max-width:380px;width:90%;text-align:center;box-shadow:0 40px 90px -30px rgba(0,0,0,.6)}.modal-ov.show .modal-bx{animation:bxIn .3s cubic-bezier(.16,.84,.44,1)}.modal-bx h3{font:600 22px Georgia,serif;margin:0 0 8px;color:#1b2447}.modal-bx p{margin:0 0 22px;color:#5a5c66;font-size:15px}.modal-ac{display:flex;gap:10px;justify-content:center}.modal-ac button{padding:10px 22px;border:0;border-radius:5px;font-size:14px;font-weight:600;cursor:pointer}.btn-cancel{background:#e3dac6;color:#1b2447}.btn-del{background:#b3261e;color:#fff}@keyframes ovIn{from{opacity:0}to{opacity:1}}@keyframes bxIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}</style>' +
     '<h1>Haydn &amp; Marisa — Guest List</h1>' +
     '<p class="stats"><b>' + list.length + '</b> responses &nbsp;·&nbsp; <b>' + yes + '</b> attending (' + heads +
     ' guests) &nbsp;·&nbsp; <b>' + no + '</b> regrets</p>' +
     '<a class="btn" href="/api/attendees.csv">Download CSV</a><a class="btn logout" href="/api/logout">Log out</a>' +
     '<table><tr><th>When</th><th>Name</th><th>Attending</th><th>Guests</th><th>Meal</th><th>Email</th><th>Message</th><th>Delete</th></tr>' +
-    rows + '</table>';
+    rows + '</table>' +
+    '<div id="modal" class="modal-ov"><div class="modal-bx"><h3>Delete RSVP?</h3><p>Remove the response from <strong id="m-name"></strong>? This cannot be undone.</p><div class="modal-ac"><button type="button" id="m-cancel" class="btn-cancel">Cancel</button><form method="POST" action="/api/delete" style="margin:0"><input type="hidden" name="ts" id="m-ts"><button type="submit" class="btn-del">Delete</button></form></div></div></div>' +
+    '<script>(function(){var m=document.getElementById("modal"),n=document.getElementById("m-name"),t=document.getElementById("m-ts");function o(ts,nm){t.value=ts;n.textContent=nm||"this guest";m.classList.add("show");}function c(){m.classList.remove("show");}document.querySelectorAll("button.del").forEach(function(b){b.addEventListener("click",function(){o(b.getAttribute("data-ts"),b.getAttribute("data-name"));});});document.getElementById("m-cancel").addEventListener("click",c);m.addEventListener("click",function(e){if(e.target===m)c();});document.addEventListener("keydown",function(e){if(e.key==="Escape")c();});})();</script>';
 }
 
 const server = http.createServer(function (req, res) {
