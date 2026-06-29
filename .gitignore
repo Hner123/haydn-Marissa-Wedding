@@ -1,6 +1,10 @@
 # Old timestamped editing backups (kept locally, not needed in the repo)
 archive/
 
+# Music: keep only the deploy copy in the repo (deploy/music.mp3 is committed)
+/music.mp3
+background-music/
+
 # OS / editor cruft
 Thumbs.db
 .DS_Store
